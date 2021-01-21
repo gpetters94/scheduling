@@ -23,6 +23,14 @@ Qt code, in my experience - C++ is too slow to prototype and the other language 
 nearly as mature. I was initially going to make this a CLI program, but I decided that a simple
 GUI would be both more straightforward both to code and use. I'm not sure I was right on the first
 count, but I definitely don't think a CLI I would make would have the simplicity that this GUI does.
+
+Usage:
+    python3 scheduler.py [data.csv]
+
+The program takes only one command line argument - an optional CSV filename. If not given,
+the program will prompt the user for the schedule time of each mentor and the companies
+assigned to them. If the file is given, this information will be taken from there and
+the program will require significantly less user input.
 '''
 
 from enum import Enum
