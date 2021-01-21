@@ -1,12 +1,137 @@
 
 from enum import Enum, EnumMeta
+from random import randint, shuffle
+import sys
+import csv
+from concurrent.futures import ProcessPoolExecutor
+import concurrent.futures
+from copy import copy
+from math import floor
 
-from PyQt5.QtWidgets import QMainWindow, QApplication, QWidget, QLabel, QHBoxLayout, QGridLayout, QFileDialog, QPushButton
+from PyQt5.QtWidgets import QMainWindow, QApplication, QWidget, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QFileDialog, QPushButton, QRadioButton, QGroupBox, QComboBox, QCheckBox
 from PyQt5.QtGui import QMouseEvent
 from PyQt5 import QtCore
 
-def detect_collisions(mentors, companies, assignments):
-    pass
+from flowlayout import FlowLayout
+
+# Takes in a set of (mentor, company, (day, time)) and returns True if there are no collisions
+def is_valid(schedule):
+    mentor_schedules = {}
+    company_schedules = {}
+    for (mentor, company, (day, time)) in schedule:
+        if mentor not in mentor_schedules.keys() and company not in company_schedules.keys():
+            mentor_schedules[mentor] = [(day, time)]
+            company_schedules[company] = [(day, time)]
+            continue
+        if mentor not in mentor_schedules.keys():
+            mentor_schedules[mentor] = []
+        if company not in company_schedules.keys():
+            company_schedules[company] = []
+        
+        if (day, time) in company_schedules[company] or (day, time) in mentor_schedules[mentor]:
+            return False
+        else:
+            mentor_schedules[mentor].append((day, time))
+            company_schedules[company].append((day, time))
+    return True
+
+# Returns a set of (mentor, company, (day, time)) containing the possible collisions (where the same company is assigned to multiple mentors in one day)
+def possible_collisions(mentors, companies, m_times, c_mentors):
+    conflicts = set()
+    seen = {}
+    
+    for company in companies:
+        for mentor in mentors:
+            if mentor not in c_mentors[company]:
+                continue
+            time = m_times[mentor]
+            if time in seen and company in seen[time]:
+                conflicts.add((mentor, company, time))
+                for other_mentor in seen[time][company]:
+                    conflicts.add((other_mentor, company, time))
+            if time not in seen:
+                seen[time] = {}
+            if company not in seen[time]:
+                seen[time][company] = []
+            seen[time][company].append(mentor)
+
+    return conflicts
+
+# Returns a set of (mentor, company, (day, time)) or set() if no assignments can resolve the potential conflicts after 1,000,000 random draws
+def step_1(matrix):
+
+    # Convert AM/PM to a random time (in 20-minute blocks)
+    def deterministic_time(time, i):
+        if time == "AM":
+            return (9 + int(i/3), i%3*20)
+        else:
+            return (12 + int(i/3), i%3*20)
+
+    for i in range(len(matrix)**2*2):
+        schedule = set()
+        matrix = list(matrix)
+        shuffle(matrix)
+        for (mentor, company, (day, time)) in matrix:
+            for j in range(8):
+                new_time = deterministic_time(time, j)
+                schedule.add((mentor, company, (day, new_time)))
+                if not is_valid(schedule):
+                    schedule.remove((mentor, company, (day, new_time)))
+                    continue
+                else:
+                    break
+                
+        if is_valid(schedule):
+            return schedule
+
+    return None
+
+# Returns a set of (mentor, company, (day, time)) or None for the unscheduled mentors
+def step_2(unassigned, m_to_c, proto_schedule):
+
+    def random_assignment():
+        return ["AM", "PM"][randint(0, 1)]
+
+    def random_day():
+        return randint(1,5)
+
+    def deterministic_time(time, i):
+        if time == "AM":
+            return (9 + int(i/3), i%3*20)
+        else:
+            return (12 + int(i/3), i%3*20)
+
+    for i in range(len(unassigned)**2*2):
+        
+        times = {}
+        for mentor in unassigned:
+            times[mentor] = (random_day(), random_assignment())
+        
+        assignments = set()
+        for (mentor, company) in m_to_c:
+            def run_simulation():
+                for j in range(9):
+                    entry = (mentor, company, (times[mentor][0], deterministic_time(times[mentor][1], j)))
+                    assignments.add(entry)
+                    if not is_valid(assignments.union(proto_schedule)):
+                        if j < 8:
+                            assignments.remove(entry)
+                            continue
+                        else:
+                            return False
+                    else:
+                        return True
+            if run_simulation():
+                continue
+            else:
+                break
+        
+        if is_valid(assignments.union(proto_schedule)):
+            return assignments.union(proto_schedule)
+        else:
+            continue
+    
+    return None
 
 UIState = Enum('UIState', 'MENTORS COMPANIES AVAILABILITY MENTOR_ASSIGNMENT FINISHED')
 class UIWidget(QWidget):
@@ -48,6 +173,68 @@ class UIWidget(QWidget):
                 exit(-1)
 
             self.set_state(UIState.AVAILABILITY)
+    def schedule_logic(self):
+
+        assigned = {}
+        unassigned = set()
+        for mentor in self.mentors:
+            (day, time) = self.mentors[mentor]
+            if day is None or time is None:
+                unassigned.add(mentor)
+            else:
+                assigned[mentor] = (day, time)
+
+        assigned_schedule = set()
+        unassigned_schedule = set()
+        for company in self.company_assignments:
+            mentors = self.company_assignments[company]
+            for mentor in mentors:
+                if mentor in assigned:
+                    assigned_schedule.add((mentor, company, assigned[mentor]))
+                else:
+                    unassigned_schedule.add((mentor, company))
+
+        p1 = step_1(assigned_schedule)
+        if p1 is None:
+            print("No solution found")
+            exit(0)
+
+        p2 = step_2(unassigned, unassigned_schedule, p1)
+        if p2 is None:
+            print("No solution found")
+            exit(0)
+
+        output = {}
+        for (mentor, company, (day, time)) in p2:
+            if mentor not in output:
+                output[mentor] = []
+            output[mentor].append(((day, time), company))
+        for mentor in output:
+            output[mentor].sort()
+            
+        def format_day(day):
+            return ["Mon", "Tue", "Wed", "Thur", "Fri"][day-1]
+        def format_time(time):
+            h = time[0]
+            m = time[1]
+            return ("{0}".format(h) if h <= 12 else "{0}".format(h-12)) + ":" + "{0:02}".format(m) + (" PM" if h >= 12 else " AM")
+
+        # TODO: Properly format output
+        with open('output.csv', 'w') as f:
+            out = csv.writer(f, delimiter=",")
+            out.writerow(['Name', 'Day'] + ["Meeting {}".format(x+1) for x in range(len(self.companies))])
+            for mentor in sorted(output.keys()):
+                out_list = [mentor]
+                first = True
+                for ((day, time), company) in output[mentor]:
+                    if first:
+                        out_list += [format_day(day)]
+                        first = False
+                    out_list += [format_time(time) + ": " + company]
+                out.writerow(out_list)
+
+        exit(0)
+
     def set_state(self, state):
         if not isinstance(state, UIState):
             print("Invalid state, exiting")
@@ -61,7 +248,7 @@ class UIWidget(QWidget):
             window_layout = QGridLayout()
             central.setLayout(window_layout)
 
-            label = QLabel("Step 1/6: Mentor list\nInput a newline-separated list of all attending mentors")
+            label = QLabel("Step 1/4: Mentor list\nInput a newline-separated list of all attending mentors")
             label.setAlignment(QtCore.Qt.AlignCenter)
             window_layout.addWidget(label, 0, 0, 0, 10)
 
@@ -82,9 +269,9 @@ class UIWidget(QWidget):
             files.mousePressEvent = (lambda _: set_text(QFileDialog.getOpenFileName(self, "Select mentors file")[0]))
             button_layout.addWidget(files)
 
-            next = QPushButton("Next")
-            next.mousePressEvent = (lambda _: self.import_mentors(files.text()))
-            button_layout.addWidget(next)
+            next_button = QPushButton("Next")
+            next_button.mousePressEvent = (lambda _: self.import_mentors(files.text()))
+            button_layout.addWidget(next_button)
         elif state is UIState.COMPANIES:
             self.clear()
 
@@ -94,7 +281,7 @@ class UIWidget(QWidget):
             window_layout = QGridLayout()
             central.setLayout(window_layout)
 
-            label = QLabel("Step 2/6: Companies list\nInput a newline-separated list of all companies taking part")
+            label = QLabel("Step 2/4: Companies list\nInput a newline-separated list of all companies taking part")
             label.setAlignment(QtCore.Qt.AlignCenter)
             window_layout.addWidget(label, 0, 0, 0, 10)
 
@@ -115,31 +302,132 @@ class UIWidget(QWidget):
             files.mousePressEvent = (lambda _: set_text(QFileDialog.getOpenFileName(self, "Select companies file")[0]))
             button_layout.addWidget(files)
 
-            next = QPushButton("Next")
-            next.mousePressEvent = (lambda _: self.import_companies(files.text()))
-            button_layout.addWidget(next)
+            next_button = QPushButton("Next")
+            next_button.mousePressEvent = (lambda _: self.import_companies(files.text()))
+            button_layout.addWidget(next_button)
         elif state is UIState.AVAILABILITY:
             self.clear()
 
-            for mentor in self.mentors.keys():
+            daytonum = {"Monday": 1, "Tuesday": 2, "Wednesday": 3, "Thursday": 4, "Friday": 5, "Undefined": None}
+
+            if "csv_file" in dir(self) and self.csv_file is not None:
+                with open(self.csv_file, newline='\n') as f:
+                    reader = csv.reader(f, delimiter=',')
+                    self.company_assignments = {company: set() for company in self.companies}
+                    first = True
+                    for row in reader:
+                        if first:
+                            first = False
+                            continue
+                        mentor = row[0].strip()
+                        (day, time) = (row[1].strip(), row[2].strip())
+                        companies = [x.strip() for x in row[3:] if x != '']
+
+                        self.mentors[mentor] = ((None if day == "Undefined" or time == "Undefined" else daytonum[day]), (None if time == "Undefined" or day == "Undefined" else time))
+                        for company in companies:
+                            self.company_assignments[company].add(mentor)
+                self.schedule_logic()
+
+            count = 0
+            total = len(self.mentors)
+            for mentor in self.mentors:
+                count += 1
                 central = QWidget()
                 self.layout().addWidget(central)
             
-                window_layout = QGridLayout()
-                central.setLayout(window_layout)
+                central.setLayout(QGridLayout(central))
+
+                msg = QLabel("Step 3/4: Please choose availability for {0} ({1}/{2})".format(mentor, count, total))
+                msg.setAlignment(QtCore.Qt.AlignCenter)
+                central.layout().addWidget(msg, 0, 0, 10, 10)
+
+                selection = QWidget()
+                QHBoxLayout(selection)
+
+                dropdowns = QWidget()
+                QHBoxLayout(dropdowns)
+                selection.layout().addWidget(dropdowns)
+
+                day = QComboBox()
+                day.addItems(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Undefined"])
+                dropdowns.layout().addWidget(day)
+
+                time = QComboBox()
+                time.addItems(["AM", "PM", "Undefined"])
+                dropdowns.layout().addWidget(time)
+
+                next_button = QPushButton("Next")
+                selection.layout().addWidget(next_button)
+
+                central.layout().addWidget(selection, 10, 0, 1, 10)
+
+                wait = QtCore.QEventLoop()
+                def exit_loop():
+                    self.mentors[mentor] = ((None if time.currentText() == "Undefined" or day.currentText() == "Undefined" else daytonum[day.currentText()]), (None if time.currentText() == "Undefined" or day.currentText() == "Undefined" else time.currentText()))
+                    wait.quit()
+                next_button.pressed.connect(exit_loop)
+                wait.exec()
 
                 self.clear()
-        elif state is MENTOR_ASSIGNMENT:
-            pass
+            self.set_state(UIState.MENTOR_ASSIGNMENT)
+        elif state is UIState.MENTOR_ASSIGNMENT:
+            self.clear()
+
+            self.company_assignments = {company: set() for company in self.companies}
+            count = 0
+            total = len(self.mentors.keys())
+            for mentor in self.mentors.keys():
+                count += 1
+                central = QWidget()
+                self.layout().addWidget(central)
+            
+                central.setLayout(QGridLayout(central))
+
+                msg = QLabel("Step 4/4: Please choose companies assigned to {0} ({1}/{2})".format(mentor, count, total))
+                msg.setAlignment(QtCore.Qt.AlignCenter)
+                central.layout().addWidget(msg, 0, 0, 10, 10)
+
+                selection = QWidget()
+                QHBoxLayout(selection)
+
+                buttons = QGroupBox()
+                buttons.setLayout(FlowLayout())
+                for company in self.companies:
+                    button = QCheckBox(company)
+                    buttons.layout().addWidget(button)
+                selection.layout().addWidget(buttons)
+
+                next_button = QPushButton("Next")
+                selection.layout().addWidget(next_button)
+
+                central.layout().addWidget(selection, 10, 0, 1, 10)
+
+                wait = QtCore.QEventLoop()
+                def exit_loop():
+                    # Loop through all check buttons, adding to the assignments
+                    for item in buttons.children():
+                        if isinstance(item, QCheckBox) and item.isChecked():
+                            self.company_assignments[item.text()].add(mentor)
+                    wait.quit()
+                next_button.pressed.connect(exit_loop)
+                wait.exec()
+
+                self.clear()
+            self.set_state(UIState.FINISHED)
         else:
-            pass
+            self.schedule_logic()
 
-application = QApplication([])
-ui = UIWidget()
-window = QMainWindow()
+if __name__ == "__main__":
+    application = QApplication([])
+    ui = UIWidget()
+    window = QMainWindow()
 
-window.resize(800, 600)
-window.setCentralWidget(ui)
-window.show()
+    # TODO: Consume CSV for faster testing
+    if len(sys.argv) > 1:
+        ui.csv_file = sys.argv[1]
 
-application.exec()
+    window.resize(800, 600)
+    window.setCentralWidget(ui)
+    window.show()
+
+    application.exec()
