@@ -1,20 +1,15 @@
 
-from enum import Enum, EnumMeta
+from enum import Enum
 from random import randint, shuffle
 import sys
 import csv
-from concurrent.futures import ProcessPoolExecutor
-import concurrent.futures
-from copy import copy
-from math import floor
 
-from PyQt5.QtWidgets import QMainWindow, QApplication, QWidget, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QFileDialog, QPushButton, QRadioButton, QGroupBox, QComboBox, QCheckBox
-from PyQt5.QtGui import QMouseEvent
+from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QLabel, QHBoxLayout,
+    QGridLayout, QFileDialog, QPushButton, QGroupBox, QComboBox, QCheckBox)
 from PyQt5 import QtCore
 
 from flowlayout import FlowLayout
 
-# Takes in a set of (mentor, company, (day, time)) and returns True if there are no collisions
 def is_valid(schedule):
     mentor_schedules = {}
     company_schedules = {}
@@ -35,7 +30,6 @@ def is_valid(schedule):
             company_schedules[company].append((day, time))
     return True
 
-# Returns a set of (mentor, company, (day, time)) containing the possible collisions (where the same company is assigned to multiple mentors in one day)
 def possible_collisions(mentors, companies, m_times, c_mentors):
     conflicts = set()
     seen = {}
@@ -57,7 +51,6 @@ def possible_collisions(mentors, companies, m_times, c_mentors):
 
     return conflicts
 
-# Returns a set of (mentor, company, (day, time)) or set() if no assignments can resolve the potential conflicts after 1,000,000 random draws
 def step_1(matrix):
 
     # Convert AM/PM to a random time (in 20-minute blocks)
@@ -67,7 +60,7 @@ def step_1(matrix):
         else:
             return (12 + int(i/3), i%3*20)
 
-    for i in range(len(matrix)**2*2):
+    for _ in range(len(matrix)**2*2):
         schedule = set()
         matrix = list(matrix)
         shuffle(matrix)
@@ -101,7 +94,7 @@ def step_2(unassigned, m_to_c, proto_schedule):
         else:
             return (12 + int(i/3), i%3*20)
 
-    for i in range(len(unassigned)**2*2):
+    for _ in range(len(unassigned)**2*2):
         
         times = {}
         for mentor in unassigned:
@@ -119,8 +112,7 @@ def step_2(unassigned, m_to_c, proto_schedule):
                             continue
                         else:
                             return False
-                    else:
-                        return True
+                    return True
             if run_simulation():
                 continue
             else:
@@ -219,7 +211,6 @@ class UIWidget(QWidget):
             m = time[1]
             return ("{0}".format(h) if h <= 12 else "{0}".format(h-12)) + ":" + "{0:02}".format(m) + (" PM" if h >= 12 else " AM")
 
-        # TODO: Properly format output
         with open('output.csv', 'w') as f:
             out = csv.writer(f, delimiter=",")
             out.writerow(['Name', 'Day'] + ["Meeting {}".format(x+1) for x in range(len(self.companies))])
@@ -258,12 +249,10 @@ class UIWidget(QWidget):
             window_layout.addWidget(buttons, 10,0, 1, 10)
 
             files = QLabel("Select file")
-            updated = False
 
             def set_text(val):
                 if val != "" and val != "Select file":
                     files.setText(val)
-                    updated = True
 
             files.setAlignment(QtCore.Qt.AlignHCenter)
             files.mousePressEvent = (lambda _: set_text(QFileDialog.getOpenFileName(self, "Select mentors file")[0]))
@@ -291,12 +280,10 @@ class UIWidget(QWidget):
             window_layout.addWidget(buttons, 10,0, 1, 10)
 
             files = QLabel("Select file")
-            updated = False
 
             def set_text(val):
                 if val != "" and val != "Select file":
                     files.setText(val)
-                    updated = True
 
             files.setAlignment(QtCore.Qt.AlignHCenter)
             files.mousePressEvent = (lambda _: set_text(QFileDialog.getOpenFileName(self, "Select companies file")[0]))
@@ -422,7 +409,6 @@ if __name__ == "__main__":
     ui = UIWidget()
     window = QMainWindow()
 
-    # TODO: Consume CSV for faster testing
     if len(sys.argv) > 1:
         ui.csv_file = sys.argv[1]
 
