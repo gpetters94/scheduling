@@ -71,37 +71,6 @@ def is_valid(schedule):
             company_schedules[company].append((day, time))
     return True
 
-# def possible_collisions(mentors, companies, m_times, c_mentors):
-#     '''
-#     Filters out possible collisions, to simplify the scheduling process
-#     Inputs:
-#         mentors: [mentor ...]
-#         companies: [company ...]
-#         m_times: {mentor: (day, time) ...}
-#         c_mentors: {company: [mentor ...] ...}
-#     Output:
-#         possible collisions in the form {(mentor, company, (day, time)) ...}
-#    '''
-#     conflicts = set()
-#     seen = {}
-    
-#     for company in companies:
-#         for mentor in mentors:
-#             if mentor not in c_mentors[company]:
-#                 continue
-#             time = m_times[mentor]
-#             if time in seen and company in seen[time]:
-#                 conflicts.add((mentor, company, time))
-#                 for other_mentor in seen[time][company]:
-#                     conflicts.add((other_mentor, company, time))
-#             if time not in seen:
-#                 seen[time] = {}
-#             if company not in seen[time]:
-#                 seen[time][company] = []
-#             seen[time][company].append(mentor)
-
-#     return conflicts
-
 def step_1(matrix):
     '''
     Steps through the proto-schedule, assigning times to each mentor/company pair,
